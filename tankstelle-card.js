@@ -9,7 +9,7 @@ const LitElement = Object.getPrototypeOf(
 );
 const { html, css } = LitElement.prototype;
 
-const CARD_VERSION = "2.2.1";
+const CARD_VERSION = "2.2.2";
 // Logos liegen im Repo (Ordner /logos) und kommen über das jsDelivr-CDN.
 // Eigene Quelle möglich über die Option logo_base (z.B. "/local/tankstelle/logos/").
 const LEGACY_LOGO_BASE = "https://www.irmscher.at/homeassistant/logos/";
@@ -96,6 +96,43 @@ const NAV_URL = {
   waze: (lat, lon) => `https://waze.com/ul?ll=${lat},${lon}&navigate=yes`,
 };
 
+// --- LED-Schrift vermessen ---
+// Manche Pixel-/LED-Schriften zeichnen ihre Ziffern viel größer (oder versetzt) als ihre
+// Schriftmetrik angibt. Wir messen die echte Größe der Ziffern einmal per Canvas und
+// skalieren/verschieben die Schrift so, dass sie immer im Rahmen sitzt.
+const LED_FONT = '"TripleDotDigital7", "Repet", ui-monospace, monospace';
+const LED_INK_TARGET = 0.8; // Ziffernhöhe relativ zur eingestellten Schriftgröße
+let ledMetricsPromise = null;
+function ledMetrics() {
+  if (ledMetricsPromise) return ledMetricsPromise;
+  ledMetricsPromise = (async () => {
+    try { await document.fonts.load(`100px ${LED_FONT}`, "0123456789."); } catch (e) { /* egal */ }
+    try { await document.fonts.ready; } catch (e) { /* egal */ }
+    const ctx = document.createElement("canvas").getContext("2d");
+    ctx.font = `100px ${LED_FONT}`;
+    const m = ctx.measureText("8.88");
+    const inkAsc = m.actualBoundingBoxAscent, inkDesc = m.actualBoundingBoxDescent;
+    const inkH = (inkAsc + inkDesc) / 100;
+    if (!(inkH > 0.2 && inkH < 5)) return { scale: 1, dy: 0, padx: 0 };
+    const scale = Math.min(1.4, LED_INK_TARGET / inkH);
+    // Ziffern vertikal in die Zeile zentrieren (Einheit: em der skalierten Schrift)
+    let dy = 0;
+    if (m.fontBoundingBoxAscent != null) {
+      const inkMid = (inkAsc - inkDesc) / 2;
+      const boxMid = (m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 2;
+      dy = (inkMid - boxMid) / 100;
+    }
+    // Ragen die Ziffern seitlich über ihre Laufweite hinaus?
+    const inkW = (m.actualBoundingBoxLeft || 0) + (m.actualBoundingBoxRight || 0);
+    const padx = Math.max(0, (inkW - m.width) / 2 / 100);
+    // Ziffern horizontal über ihrer Laufweite zentrieren
+    const inkMidX = ((m.actualBoundingBoxRight || 0) - (m.actualBoundingBoxLeft || 0)) / 2;
+    const dx = (m.width / 2 - inkMidX) / 100;
+    return { scale, dy, padx, dx };
+  })();
+  return ledMetricsPromise;
+}
+
 // --- Übersetzungen / Translations ---
 const I18N = {
   de: {
@@ -152,6 +189,12 @@ class TankstelleCard extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    ledMetrics().then(({ scale, dy, padx, dx }) => {
+      this.style.setProperty("--led-scale", scale.toFixed(3));
+      this.style.setProperty("--led-dy", `${dy.toFixed(3)}em`);
+      this.style.setProperty("--led-dx", `${(dx || 0).toFixed(3)}em`);
+      this.style.setProperty("--led-padx", `${padx.toFixed(3)}em`);
+    });
     // einmal pro Minute: "Stand"-Zeit und Trendpfeile aktualisieren
     this._timer = setInterval(() => (this._tick = Date.now()), 60000);
   }
@@ -630,34 +673,41 @@ class TankstelleCard extends LitElement {
       .meta .diff { color: #e38a7d; }
 
       /* ---------- LED-Preisanzeige ---------- */
+      /* --led-fs = eingestellte Größe; die Schrift selbst wird per --led-scale (gemessen)
+         so skaliert, dass die Ziffern ca. 80 % davon hoch sind -> passt immer in den Rahmen */
       .price {
+        --led-fs: min(var(--price-font-size), 8cqi);
         position: relative;
         display: flex; align-items: center; justify-content: center;
         min-width: min(var(--price-min-width), 34cqi);
         box-sizing: border-box;
-        /* die LED-Schrift zeichnet über ihre eigenen Maße hinaus -> großzügiger Rand */
-        padding: 0.22em 0.55em 0.18em 0.45em;
-        font-size: min(var(--price-font-size), 8cqi);
+        padding: calc(var(--led-fs) * .12) calc(var(--led-fs) * .32);
         border-radius: 5px;
         background: #000;
         border: 1px solid #262626;
         box-shadow: inset 0 0 8px color-mix(in srgb, var(--led) 8%, transparent);
+        overflow: hidden;
       }
-      .digits { display: inline-flex; align-items: flex-start; gap: 0.08em; }
+      .digits { display: inline-flex; align-items: flex-start; gap: calc(var(--led-fs) * .06); }
       .led {
         display: inline-grid;
         font-family: "TripleDotDigital7", "Repet", ui-monospace, monospace;
-        font-size: min(var(--price-font-size), 8cqi);
-        line-height: 1.15;
+        font-size: calc(var(--led-fs) * var(--led-scale, .8));
+        line-height: calc(var(--led-fs) * .9);
+        padding: 0 var(--led-padx, 0);
         font-variant-numeric: tabular-nums;
       }
-      .led > span { grid-area: 1 / 1; white-space: pre; }
+      .led > span {
+        grid-area: 1 / 1;
+        white-space: pre;
+        transform: translate(var(--led-dx, 0), var(--led-dy, 0));
+      }
       .led .ghost { color: var(--led); opacity: .06; }
       .led .lit {
         color: var(--led);
         text-shadow: 0 0 4px color-mix(in srgb, var(--led) 55%, transparent);
       }
-      .led.sup { font-size: calc(min(var(--price-font-size), 8cqi) * .6); line-height: 1.1; }
+      .led.sup { --led-fs: calc(min(var(--price-font-size), 8cqi) * .58); }
 
       .trend { position: absolute; top: 2px; left: 4px; font-size: 8px; line-height: 1; }
       .trend.up { color: #ff5a4a; }
@@ -713,9 +763,8 @@ class TankstelleCard extends LitElement {
       }
       @container (max-width: 300px) {
         .panel { grid-template-columns: var(--cols-narrow); }
-        .price { grid-column: 1 / -1; grid-row: 2; justify-self: end; min-width: 0; font-size: min(var(--price-font-size), 11cqi); }
-        .led { font-size: min(var(--price-font-size), 11cqi); }
-        .led.sup { font-size: calc(min(var(--price-font-size), 11cqi) * .6); }
+        .price { --led-fs: min(var(--price-font-size), 11cqi); grid-column: 1 / -1; grid-row: 2; justify-self: end; min-width: 0; }
+        .led.sup { --led-fs: calc(min(var(--price-font-size), 11cqi) * .58); }
         .meta { display: none; }
       }
       @container (max-width: 240px) {
