@@ -10,8 +10,11 @@ const LitElement = Object.getPrototypeOf(
 );
 const { html, css } = LitElement.prototype;
 
-const CARD_VERSION = "2.0.0";
-const LOGO_BASE = "https://www.irmscher.at/homeassistant/logos/";
+const CARD_VERSION = "2.1.0";
+// Logos liegen im Repo (Ordner /logos) und kommen über das jsDelivr-CDN.
+// Eigene Quelle möglich über die Option logo_base (z.B. "/local/tankstelle/logos/").
+const LEGACY_LOGO_BASE = "https://www.irmscher.at/homeassistant/logos/";
+const LOGO_BASE = "https://cdn.jsdelivr.net/gh/irmscher123/tankstelle-card@main/logos/";
 
 // Schriftart global laden (@font-face funktioniert im Shadow DOM nicht)
 const FONT_URL = "/local/fonts/triple_dot_digital-7.ttf";
@@ -57,13 +60,15 @@ const DEFAULTS = {
   card_color: "#1c1c1c",
   accent_color: "",            // leer = automatisch (Diesel gelb, Super grün)
   led_color: "#00ff00",
-  price_box_min_width: 130,
-  price_font_size: 26,
+  price_box_min_width: 104,
+  price_font_size: 22,
   decimal_separator: ".",
   superscript_digit: true,     // letzte Kommastelle hochgestellt wie an der Säule
   ghost_digits: true,          // "ausgeschaltete" LED-Segmente im Hintergrund
   show_header: true,
   show_logos: true,
+  logo_base: "",               // leer = Logos aus dem GitHub-Repo
+  show_rank: false,
   show_base: true,             // Standfuß der Säule
   show_updated: true,
   // Funktionen
@@ -106,7 +111,8 @@ class TankstelleCard extends LitElement {
   }
 
   static getStubConfig() {
-    return { ...DEFAULTS };
+    const { base_entity, fuel_type, count, location_name } = DEFAULTS;
+    return { base_entity, fuel_type, count, location_name };
   }
 
   constructor() {
@@ -185,6 +191,22 @@ class TankstelleCard extends LitElement {
   }
 
   // --- LOGIK ---
+  get _logoBase() {
+    const b = String(this.config.logo_base || "").trim();
+    return b ? (b.endsWith("/") ? b : b + "/") : LOGO_BASE;
+  }
+
+  // Fallback-Kette: Logo -> default.png -> Logo vom alten Server -> ausblenden
+  _logoError(e) {
+    const img = e.target;
+    const file = img.src.split("/").pop();
+    const step = Number(img.dataset.fb || 0);
+    img.dataset.fb = step + 1;
+    if (step === 0 && file !== "default.png") img.src = this._logoBase + "default.png";
+    else if (step <= 1) img.src = LEGACY_LOGO_BASE + (img.dataset.file || file);
+    else img.style.visibility = "hidden";
+  }
+
   _brand(entity) {
     const raw = entity.attributes.name || "";
     if (this._brandCache.has(raw)) return this._brandCache.get(raw);
@@ -197,7 +219,7 @@ class TankstelleCard extends LitElement {
 
     const result = {
       name: hit ? hit[1] : fallbackName,
-      logo: LOGO_BASE + (hit ? hit[2] : "default.png"),
+      logo: this._logoBase + (hit ? hit[2] : "default.png"),
     };
     this._brandCache.set(raw, result);
     return result;
@@ -309,13 +331,13 @@ class TankstelleCard extends LitElement {
     const trend = this._trendFor(id);
     const address = this._address(entity);
 
-    const chips = [];
+    const meta = [];
     if (c.show_distance !== false) {
       const dist = this._distance(entity);
-      if (dist) chips.push(html`<span class="chip"><ha-icon icon="mdi:map-marker-distance"></ha-icon>${dist}</span>`);
+      if (dist) meta.push(html`<span>${dist}</span>`);
     }
     if (c.show_diff !== false && !isBest && diffCt >= 0.05) {
-      chips.push(html`<span class="chip diff">+${diffCt.toFixed(1).replace(".", ",")} ct</span>`);
+      meta.push(html`<span class="diff">+${diffCt.toFixed(1).replace(".", ",")} ct</span>`);
     }
 
     const label = `${name}, ${address}: ${num.toFixed(3).replace(".", ",")} Euro${isBest ? ", Bestpreis" : ""}`;
@@ -328,11 +350,9 @@ class TankstelleCard extends LitElement {
            }}>
         ${c.show_logos !== false
           ? html`<div class="logo">
-              <img src=${logo} alt="" loading="lazy" decoding="async"
-                   @error=${(e) => {
-                     if (!e.target.src.endsWith("default.png")) e.target.src = LOGO_BASE + "default.png";
-                   }} />
-              <span class="rank">${rank}</span>
+              <img src=${logo} data-file=${logo.split("/").pop()} alt="" loading="lazy" decoding="async"
+                   @error=${(e) => this._logoError(e)} />
+              ${c.show_rank ? html`<span class="rank">${rank}</span>` : ""}
             </div>`
           : ""}
         <div class="info">
@@ -340,8 +360,12 @@ class TankstelleCard extends LitElement {
             <span class="name-text">${name}</span>
             ${isBest ? html`<span class="tag">Bestpreis</span>` : ""}
           </div>
-          ${address ? html`<div class="addr">${address}</div>` : ""}
-          ${chips.length ? html`<div class="chips">${chips}</div>` : ""}
+          ${address || meta.length
+            ? html`<div class="sub">
+                ${address ? html`<span class="addr">${address}</span>` : ""}
+                ${meta.length ? html`<span class="meta">${meta}</span>` : ""}
+              </div>`
+            : ""}
         </div>
         <div class="price" data-entity=${id}>
           ${trend
@@ -466,52 +490,38 @@ class TankstelleCard extends LitElement {
         flex-grow: 1;
         display: flex;
         flex-direction: column;
-        gap: clamp(6px, 2cqi, 10px);
-        padding: clamp(6px, 2.4cqi, 12px);
-        border-radius: 20px 20px 8px 8px;
+        gap: 6px;
+        padding: 6px;
+        border-radius: 14px 14px 6px 6px;
         background:
           linear-gradient(90deg,
-            rgba(255,255,255,.10) 0, rgba(255,255,255,.02) 2.5%,
-            transparent 6%, transparent 94%,
-            rgba(255,255,255,.02) 97.5%, rgba(255,255,255,.10) 100%),
-          linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,.25)),
+            rgba(255,255,255,.07) 0, transparent 3%, transparent 97%, rgba(255,255,255,.07) 100%),
           var(--mast);
-        border: 1px solid rgba(255,255,255,.10);
-        box-shadow:
-          inset 0 1px 0 rgba(255,255,255,.12),
-          inset 0 -2px 0 rgba(0,0,0,.4),
-          0 10px 28px rgba(0,0,0,.45);
+        border: 1px solid rgba(255,255,255,.08);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 6px 18px rgba(0,0,0,.35);
         z-index: 1;
       }
 
-      /* ---------- Krone (Leuchtkasten oben) ---------- */
+      /* ---------- Krone ---------- */
       .crown {
         position: relative;
         overflow: hidden;
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 10px;
-        min-height: 54px;
-        padding: 8px 14px;
-        border-radius: 14px 14px 6px 6px;
-        background:
-          linear-gradient(180deg, rgba(255,255,255,.35), rgba(255,255,255,0) 45%),
-          var(--accent);
+        gap: 8px;
+        min-height: 40px;
+        padding: 5px 12px;
+        border-radius: 9px 9px 4px 4px;
+        background: linear-gradient(180deg, rgba(255,255,255,.28), rgba(255,255,255,0) 55%), var(--accent);
         color: #111;
-        box-shadow:
-          0 0 18px color-mix(in srgb, var(--accent) 45%, transparent),
-          inset 0 -3px 0 rgba(0,0,0,.18);
+        box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 30%, transparent);
       }
-      .crown-light {
-        position: absolute; inset: 0;
-        background: radial-gradient(120% 80% at 50% 0%, rgba(255,255,255,.45), transparent 60%);
-        pointer-events: none;
-      }
-      .crown-icon { --mdc-icon-size: clamp(24px, 7cqi, 34px); position: relative; }
+      .crown-light { display: none; }
+      .crown-icon { --mdc-icon-size: 22px; position: relative; }
       .crown-text { position: relative; text-align: left; min-width: 0; }
       .crown-title {
-        font-size: clamp(17px, 5.6cqi, 26px);
+        font-size: clamp(15px, 4.4cqi, 19px);
         font-weight: 900;
         letter-spacing: .08em;
         text-transform: uppercase;
@@ -519,198 +529,175 @@ class TankstelleCard extends LitElement {
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
       .crown-sub {
-        font-size: clamp(10px, 2.8cqi, 12px);
+        font-size: 9.5px;
         font-weight: 700;
-        letter-spacing: .18em;
+        letter-spacing: .16em;
         text-transform: uppercase;
-        opacity: .7;
-        margin-top: 3px;
+        opacity: .65;
+        margin-top: 2px;
       }
 
       /* ---------- Preistafeln ---------- */
-      .panels { display: flex; flex-direction: column; gap: clamp(5px, 1.6cqi, 8px); flex-grow: 1; }
+      .panels { display: flex; flex-direction: column; gap: 4px; flex-grow: 1; }
 
       .panel {
         position: relative;
         display: grid;
         grid-template-columns: var(--cols-wide);
         align-items: center;
-        column-gap: clamp(8px, 2.4cqi, 12px);
-        row-gap: 6px;
-        min-height: 64px;
-        padding: 8px clamp(8px, 2.4cqi, 12px);
-        border-radius: 10px;
-        background: linear-gradient(180deg, #141414, #0b0b0b);
-        border: 1px solid rgba(255,255,255,.07);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,.05), inset 0 0 0 1px rgba(0,0,0,.6);
+        column-gap: 10px;
+        row-gap: 4px;
+        min-height: 50px;
+        padding: 5px 8px 5px 10px;
+        border-radius: 7px;
+        background: #0e0e0e;
+        border: 1px solid rgba(255,255,255,.05);
         cursor: pointer;
         outline: none;
-        transition: background .2s, transform .12s, border-color .2s;
+        transition: background .2s, transform .12s;
       }
-      .panel:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
-      .panel:active { transform: scale(.985); }
-      @media (hover: hover) {
-        .panel:hover { background: linear-gradient(180deg, #1b1b1b, #101010); }
-      }
+      .panel:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+      .panel:active { transform: scale(.99); }
+      @media (hover: hover) { .panel:hover { background: #151515; } }
       .panel.best {
-        border-color: color-mix(in srgb, var(--led) 45%, transparent);
-        box-shadow:
-          inset 0 1px 0 rgba(255,255,255,.05),
-          0 0 14px color-mix(in srgb, var(--led) 18%, transparent);
+        background: linear-gradient(90deg, color-mix(in srgb, var(--led) 9%, #0e0e0e), #0e0e0e 60%);
+      }
+      .panel.best::before {
+        content: "";
+        position: absolute; left: 0; top: 7px; bottom: 7px;
+        width: 3px; border-radius: 0 3px 3px 0;
+        background: var(--led);
+        box-shadow: 0 0 6px var(--led);
       }
 
-      .logo { position: relative; width: clamp(38px, 11cqi, 48px); aspect-ratio: 1; }
-      .logo img {
-        width: 100%; height: 100%;
-        object-fit: contain;
-        border-radius: 8px;
-        background: rgba(255,255,255,.92);
-        padding: 3px;
-        box-sizing: border-box;
-      }
+      .logo { position: relative; width: 32px; height: 32px; }
+      .logo img { width: 100%; height: 100%; object-fit: contain; border-radius: 5px; }
       .rank {
-        position: absolute; top: -6px; left: -6px;
-        min-width: 18px; height: 18px;
-        border-radius: 9px;
-        background: #2a2a2a;
-        border: 1px solid rgba(255,255,255,.18);
-        font-size: 11px; font-weight: 800; line-height: 16px; text-align: center;
-        color: #ddd;
+        position: absolute; top: -5px; left: -5px;
+        min-width: 15px; height: 15px; border-radius: 8px;
+        background: #2a2a2a; border: 1px solid rgba(255,255,255,.18);
+        font-size: 9.5px; font-weight: 800; line-height: 13px; text-align: center; color: #ddd;
       }
       .panel.best .rank { background: var(--led); color: #000; border-color: transparent; }
 
-      .info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+      .info { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
       .name { display: flex; align-items: center; gap: 6px; min-width: 0; }
       .name-text {
-        font-size: clamp(14px, 4.2cqi, 17px);
-        font-weight: 800;
-        line-height: 1.15;
+        font-size: 14.5px; font-weight: 700; line-height: 1.2;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
       .tag {
         flex-shrink: 0;
-        font-size: 9.5px; font-weight: 800;
+        font-size: 8.5px; font-weight: 800;
         letter-spacing: .08em; text-transform: uppercase;
-        padding: 2px 6px; border-radius: 6px;
-        color: #000; background: var(--led);
+        padding: 1px 5px; border-radius: 4px;
+        color: var(--led);
+        border: 1px solid color-mix(in srgb, var(--led) 50%, transparent);
       }
-      .addr {
-        font-size: 12px; color: #aaa; line-height: 1.25;
-        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+      .sub {
+        display: flex; gap: 6px; min-width: 0;
+        font-size: 11.5px; color: #8f8f8f; line-height: 1.3;
       }
-      .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
-      .chip {
-        display: inline-flex; align-items: center; gap: 3px;
-        font-size: 11px; color: #ccc; line-height: 1;
-        padding: 3px 6px; border-radius: 6px;
-        background: rgba(255,255,255,.07);
-      }
-      .chip ha-icon { --mdc-icon-size: 13px; opacity: .8; }
-      .chip.diff { color: #ff9c8f; background: rgba(255,80,60,.12); }
+      .addr { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .meta { flex-shrink: 0; display: inline-flex; gap: 6px; }
+      .meta > span::before { content: "·"; margin-right: 6px; color: #555; }
+      .sub > .meta:first-child > span:first-child::before { content: none; }
+      .meta .diff { color: #e38a7d; }
 
       /* ---------- LED-Preisanzeige ---------- */
       .price {
         position: relative;
         display: flex; align-items: center; justify-content: center;
-        min-width: min(var(--price-min-width), 40cqi);
+        min-width: min(var(--price-min-width), 34cqi);
         box-sizing: border-box;
-        padding: 6px 10px;
-        border-radius: 7px;
-        background: radial-gradient(120% 100% at 50% 40%, #050805, #000);
-        border: 1px solid #2c2c2c;
-        box-shadow: inset 0 0 12px color-mix(in srgb, var(--led) 12%, transparent), inset 0 2px 4px rgba(0,0,0,.8);
+        padding: 3px 8px;
+        border-radius: 5px;
+        background: #000;
+        border: 1px solid #262626;
+        box-shadow: inset 0 0 8px color-mix(in srgb, var(--led) 8%, transparent);
       }
       .digits { display: inline-flex; align-items: flex-start; }
       .led {
         display: inline-grid;
         font-family: "TripleDotDigital7", "Repet", ui-monospace, monospace;
-        font-size: min(var(--price-font-size), 9.5cqi);
+        font-size: min(var(--price-font-size), 8cqi);
         line-height: 1;
         font-variant-numeric: tabular-nums;
       }
       .led > span { grid-area: 1 / 1; white-space: pre; }
-      .led .ghost { color: var(--led); opacity: .07; }
+      .led .ghost { color: var(--led); opacity: .06; }
       .led .lit {
         color: var(--led);
-        text-shadow:
-          0 0 4px color-mix(in srgb, var(--led) 70%, transparent),
-          0 0 12px color-mix(in srgb, var(--led) 35%, transparent);
+        text-shadow: 0 0 4px color-mix(in srgb, var(--led) 55%, transparent);
       }
-      .led.sup { font-size: calc(min(var(--price-font-size), 9.5cqi) * .62); margin-left: 2px; }
+      .led.sup { font-size: calc(min(var(--price-font-size), 8cqi) * .6); margin-left: 1px; }
 
-      .trend {
-        position: absolute; top: 3px; left: 5px;
-        font-size: 9px; line-height: 1;
-      }
+      .trend { position: absolute; top: 2px; left: 4px; font-size: 8px; line-height: 1; }
       .trend.up { color: #ff5a4a; }
       .trend.down { color: var(--led); }
 
       .nav {
         display: grid; place-items: center;
-        width: 40px; height: 40px;
+        width: 32px; height: 32px;
         border-radius: 50%;
-        border: 1px solid rgba(255,255,255,.14);
+        border: none;
         background: rgba(255,255,255,.06);
-        color: #fff;
+        color: #cfcfcf;
         cursor: pointer;
         padding: 0;
-        transition: background .2s;
+        transition: background .2s, color .2s;
       }
-      .nav ha-icon { --mdc-icon-size: 20px; }
+      .nav ha-icon { --mdc-icon-size: 17px; }
       .nav:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-      @media (hover: hover) { .nav:hover { background: rgba(255,255,255,.14); } }
+      @media (hover: hover) { .nav:hover { background: rgba(255,255,255,.14); color: #fff; } }
+      /* größere Tippfläche ohne größeren Kreis */
+      .nav { position: relative; }
+      .nav::after { content: ""; position: absolute; inset: -6px; }
 
       .foot {
-        display: flex; align-items: center; justify-content: center; gap: 5px;
-        font-size: 11px; color: #888; letter-spacing: .04em;
+        display: flex; align-items: center; justify-content: center; gap: 4px;
+        font-size: 10.5px; color: #777; padding-bottom: 1px;
       }
-      .foot ha-icon { --mdc-icon-size: 13px; }
+      .foot ha-icon { --mdc-icon-size: 12px; }
 
       /* ---------- Standfuß ---------- */
       .base {
         position: relative;
-        display: flex; justify-content: center; gap: 38%;
-        height: 26px;
-        margin-top: -2px;
+        display: flex; justify-content: center; gap: 40%;
+        height: 16px;
+        margin-top: -1px;
       }
       .leg {
-        width: clamp(14px, 6cqi, 26px);
-        height: 20px;
-        background: linear-gradient(90deg, #2b2b2b, #4a4a4a 40%, #262626);
-        border-left: 1px solid rgba(255,255,255,.08);
+        width: clamp(10px, 4cqi, 18px);
+        height: 12px;
+        background: linear-gradient(90deg, #262626, #3d3d3d 40%, #222);
       }
       .plinth {
-        position: absolute; bottom: 0; left: 18%; right: 18%;
-        height: 8px; border-radius: 3px;
-        background: linear-gradient(180deg, #4a4a4a, #222);
-        box-shadow: 0 6px 12px rgba(0,0,0,.45);
+        position: absolute; bottom: 0; left: 22%; right: 22%;
+        height: 5px; border-radius: 2px;
+        background: linear-gradient(180deg, #3d3d3d, #1e1e1e);
+        box-shadow: 0 4px 8px rgba(0,0,0,.35);
       }
 
       /* ---------- Responsiv (Breite der Karte) ---------- */
-      /* Handy hochkant / schmale Spalte: Preis in eigene Zeile, groß */
-      @container (max-width: 360px) {
+      @container (max-width: 300px) {
         .panel { grid-template-columns: var(--cols-narrow); }
-        .price {
-          grid-column: 1 / -1;
-          grid-row: 2;
-          justify-content: flex-end;
-          min-width: 0;
-        }
-        .led { font-size: min(calc(var(--price-font-size) * 1.25), 14cqi); }
-        .led.sup { font-size: calc(min(calc(var(--price-font-size) * 1.25), 14cqi) * .62); }
-        .addr { -webkit-line-clamp: 1; }
+        .price { grid-column: 1 / -1; grid-row: 2; justify-self: end; min-width: 0; }
+        .led { font-size: min(var(--price-font-size), 11cqi); }
+        .led.sup { font-size: calc(min(var(--price-font-size), 11cqi) * .6); }
+        .meta { display: none; }
       }
-      /* sehr schmal (z.B. 3er-Spalte im Sections-Grid) */
       @container (max-width: 240px) {
-        .logo, .addr, .chips, .crown-icon, .crown-sub { display: none; }
+        .logo, .sub, .crown-icon, .crown-sub, .tag { display: none; }
         .panel { grid-template-columns: minmax(0,1fr) auto; }
-        .nav { width: 34px; height: 34px; }
+        .panel .price { grid-row: auto; grid-column: auto; }
+        .nav { display: none; }
       }
-      /* breit (Tablet / Wandpanel) */
       @container (min-width: 560px) {
-        .panel { min-height: 76px; }
-        .name-text { font-size: 19px; }
-        .addr { font-size: 13px; }
+        .panel { min-height: 58px; }
+        .name-text { font-size: 16px; }
+        .sub { font-size: 12.5px; }
+        .logo { width: 38px; height: 38px; }
       }
 
       /* Animation */
@@ -720,11 +707,11 @@ class TankstelleCard extends LitElement {
         100% { transform: scale(1); }
       }
       @keyframes glowPulse {
-        0%, 100% { box-shadow: inset 0 0 12px rgba(0,255,0,.1), 0 0 0 transparent; }
+        0%, 100% { box-shadow: inset 0 0 8px rgba(0,255,0,.08), 0 0 0 transparent; }
         35% {
           box-shadow:
-            inset 0 0 calc(18px * var(--glow-strength, 1)) rgba(0,255,0,.12),
-            0 0 calc(18px * var(--glow-strength, 1)) var(--glow-color);
+            inset 0 0 calc(14px * var(--glow-strength, 1)) rgba(0,255,0,.12),
+            0 0 calc(14px * var(--glow-strength, 1)) var(--glow-color);
         }
       }
       .price.price-up { --glow-color: var(--glow-up); }
@@ -781,6 +768,7 @@ const SCHEMA = [
           { name: "card_color", selector: { text: {} } },
           { name: "accent_color", selector: { text: {} } },
           { name: "led_color", selector: { text: {} } },
+          { name: "logo_base", selector: { text: {} } },
           {
             name: "decimal_separator",
             selector: { select: { mode: "dropdown", options: [{ value: ".", label: "Punkt (1.94⁹)" }, { value: ",", label: "Komma (1,94⁹)" }] } },
@@ -795,6 +783,7 @@ const SCHEMA = [
         schema: [
           { name: "show_header", selector: { boolean: {} } },
           { name: "show_logos", selector: { boolean: {} } },
+          { name: "show_rank", selector: { boolean: {} } },
           { name: "show_base", selector: { boolean: {} } },
           { name: "show_updated", selector: { boolean: {} } },
           { name: "superscript_digit", selector: { boolean: {} } },
@@ -874,6 +863,8 @@ const LABELS = {
   price_font_size: "Schriftgröße Preis",
   show_header: "Krone (Titel) anzeigen",
   show_logos: "Logos anzeigen",
+  show_rank: "Platznummer anzeigen",
+  logo_base: "Logo-Pfad (leer = aus GitHub-Repo)",
   show_base: "Standfuß anzeigen",
   show_updated: "Aktualisierungszeit anzeigen",
   superscript_digit: "Letzte Stelle hochgestellt",

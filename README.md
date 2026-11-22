@@ -33,9 +33,11 @@ location_name: Leonding
 | `accent_color` | auto | Farbe der Krone |
 | `led_color` | `#00ff00` | LED-Farbe |
 | `decimal_separator` | `.` | `.` oder `,` |
-| `price_font_size` / `price_box_min_width` | 26 / 130 | Preisanzeige in px |
+| `price_font_size` / `price_box_min_width` | 22 / 104 | Preisanzeige in px |
 | `superscript_digit`, `ghost_digits` | true | Säulen-Optik |
 | `show_header`, `show_logos`, `show_base`, `show_updated` | true | Elemente ein/aus |
+| `show_rank` | false | Platznummer am Logo |
+| `logo_base` | Repo | eigener Logo-Pfad, z.B. `/local/tankstelle/logos/` |
 | `highlight_cheapest`, `show_diff`, `show_distance`, `show_navigation` | true | Funktionen ein/aus |
 | `nav_provider` | `google` | `google`, `apple`, `waze` |
 | `trend_minutes` | 60 | Dauer der Trendpfeile (0 = aus) |
