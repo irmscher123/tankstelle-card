@@ -9,7 +9,7 @@ const LitElement = Object.getPrototypeOf(
 );
 const { html, css } = LitElement.prototype;
 
-const CARD_VERSION = "2.2.0";
+const CARD_VERSION = "2.2.1";
 // Logos liegen im Repo (Ordner /logos) und kommen über das jsDelivr-CDN.
 // Eigene Quelle möglich über die Option logo_base (z.B. "/local/tankstelle/logos/").
 const LEGACY_LOGO_BASE = "https://www.irmscher.at/homeassistant/logos/";
@@ -635,18 +635,20 @@ class TankstelleCard extends LitElement {
         display: flex; align-items: center; justify-content: center;
         min-width: min(var(--price-min-width), 34cqi);
         box-sizing: border-box;
-        padding: 3px 8px;
+        /* die LED-Schrift zeichnet über ihre eigenen Maße hinaus -> großzügiger Rand */
+        padding: 0.22em 0.55em 0.18em 0.45em;
+        font-size: min(var(--price-font-size), 8cqi);
         border-radius: 5px;
         background: #000;
         border: 1px solid #262626;
         box-shadow: inset 0 0 8px color-mix(in srgb, var(--led) 8%, transparent);
       }
-      .digits { display: inline-flex; align-items: flex-start; }
+      .digits { display: inline-flex; align-items: flex-start; gap: 0.08em; }
       .led {
         display: inline-grid;
         font-family: "TripleDotDigital7", "Repet", ui-monospace, monospace;
         font-size: min(var(--price-font-size), 8cqi);
-        line-height: 1;
+        line-height: 1.15;
         font-variant-numeric: tabular-nums;
       }
       .led > span { grid-area: 1 / 1; white-space: pre; }
@@ -655,7 +657,7 @@ class TankstelleCard extends LitElement {
         color: var(--led);
         text-shadow: 0 0 4px color-mix(in srgb, var(--led) 55%, transparent);
       }
-      .led.sup { font-size: calc(min(var(--price-font-size), 8cqi) * .6); margin-left: 1px; }
+      .led.sup { font-size: calc(min(var(--price-font-size), 8cqi) * .6); line-height: 1.1; }
 
       .trend { position: absolute; top: 2px; left: 4px; font-size: 8px; line-height: 1; }
       .trend.up { color: #ff5a4a; }
@@ -711,7 +713,7 @@ class TankstelleCard extends LitElement {
       }
       @container (max-width: 300px) {
         .panel { grid-template-columns: var(--cols-narrow); }
-        .price { grid-column: 1 / -1; grid-row: 2; justify-self: end; min-width: 0; }
+        .price { grid-column: 1 / -1; grid-row: 2; justify-self: end; min-width: 0; font-size: min(var(--price-font-size), 11cqi); }
         .led { font-size: min(var(--price-font-size), 11cqi); }
         .led.sup { font-size: calc(min(var(--price-font-size), 11cqi) * .6); }
         .meta { display: none; }
