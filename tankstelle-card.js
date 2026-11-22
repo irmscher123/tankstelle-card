@@ -1,8 +1,7 @@
 /* tankstelle-card – https://github.com/irmscher123/tankstelle-card
- * Tankstellen-Karte v2 – "Preismast"
- * - Look einer echten Tankstellen-Preissäule (Krone, Mast, LED-Preistafeln, Standfuß)
- * - Responsiv über Container-Queries (Handy, Tablet, Wandpanel, Sections-Grid)
- * - Bestpreis-Markierung, Differenz in Cent, Entfernung, Navigation, Trendpfeile
+ * Tankstellen Preismast / Fuel price pylon card for Home Assistant
+ * DE: Spritpreise im Look einer Tankstellen-Preissäule, responsiv, Deutsch & Englisch
+ * EN: Fuel prices styled like a petrol station price pylon, responsive, German & English
  */
 
 const LitElement = Object.getPrototypeOf(
@@ -10,7 +9,7 @@ const LitElement = Object.getPrototypeOf(
 );
 const { html, css } = LitElement.prototype;
 
-const CARD_VERSION = "2.1.0";
+const CARD_VERSION = "2.2.0";
 // Logos liegen im Repo (Ordner /logos) und kommen über das jsDelivr-CDN.
 // Eigene Quelle möglich über die Option logo_base (z.B. "/local/tankstelle/logos/").
 const LEGACY_LOGO_BASE = "https://www.irmscher.at/homeassistant/logos/";
@@ -97,6 +96,27 @@ const NAV_URL = {
   waze: (lat, lon) => `https://waze.com/ul?ll=${lat},${lon}&navigate=yes`,
 };
 
+// --- Übersetzungen / Translations ---
+const I18N = {
+  de: {
+    best: "Bestpreis",
+    updated: "Stand",
+    route: "Route starten",
+    routeTo: "Route zu",
+    currency: "Euro",
+    noData: "Keine Daten. Prüfe die Entity-Namen, z.B.",
+  },
+  en: {
+    best: "Best price",
+    updated: "Updated",
+    route: "Start route",
+    routeTo: "Route to",
+    currency: "euros",
+    noData: "No data. Check the entity names, e.g.",
+  },
+};
+const langOf = (hass) => (String(hass?.locale?.language || hass?.language || "de").startsWith("de") ? "de" : "en");
+
 class TankstelleCard extends LitElement {
   static get properties() {
     return {
@@ -152,6 +172,10 @@ class TankstelleCard extends LitElement {
   }
 
   // --- Entity-IDs, die diese Karte betreffen ---
+  get _t() {
+    return I18N[langOf(this.hass)];
+  }
+
   get _fuel() {
     return FUEL[this.config.fuel_type] || FUEL.diesel;
   }
@@ -282,8 +306,8 @@ class TankstelleCard extends LitElement {
     const time = d.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
     const sameDay = d.toDateString() === new Date().toDateString();
     return sameDay
-      ? `Stand ${time}`
-      : `Stand ${d.toLocaleDateString(lang, { day: "2-digit", month: "2-digit" })} ${time}`;
+      ? `${this._t.updated} ${time}`
+      : `${this._t.updated} ${d.toLocaleDateString(lang, { day: "2-digit", month: "2-digit" })} ${time}`;
   }
 
   _moreInfo(entityId) {
@@ -340,7 +364,8 @@ class TankstelleCard extends LitElement {
       meta.push(html`<span class="diff">+${diffCt.toFixed(1).replace(".", ",")} ct</span>`);
     }
 
-    const label = `${name}, ${address}: ${num.toFixed(3).replace(".", ",")} Euro${isBest ? ", Bestpreis" : ""}`;
+    const t = this._t;
+    const label = `${name}, ${address}: ${num.toFixed(3)} ${t.currency}${isBest ? `, ${t.best}` : ""}`;
 
     return html`
       <div class="panel ${isBest ? "best" : ""}" role="button" tabindex="0" aria-label=${label}
@@ -358,7 +383,7 @@ class TankstelleCard extends LitElement {
         <div class="info">
           <div class="name">
             <span class="name-text">${name}</span>
-            ${isBest ? html`<span class="tag">Bestpreis</span>` : ""}
+            ${isBest ? html`<span class="tag">${t.best}</span>` : ""}
           </div>
           ${address || meta.length
             ? html`<div class="sub">
@@ -377,7 +402,7 @@ class TankstelleCard extends LitElement {
           </span>
         </div>
         ${canNav
-          ? html`<button class="nav" title="Route starten" aria-label=${`Route zu ${name}`}
+          ? html`<button class="nav" title=${t.route} aria-label=${`${t.routeTo} ${name}`}
                     @click=${(e) => this._navigate(e, loc)}
                     @keydown=${(e) => e.stopPropagation()}>
               <ha-icon icon="mdi:navigation-variant"></ha-icon>
@@ -400,7 +425,7 @@ class TankstelleCard extends LitElement {
     if (data.length === 0) {
       return html`<ha-card class="error">
         <ha-icon icon="mdi:gas-station-off"></ha-icon>
-        <div>Keine Daten. Prüfe Entity-Namen (z.B. <code>${c.base_entity}_${this._fuel.start}</code>).</div>
+        <div>${this._t.noData} <code>${c.base_entity}_${this._fuel.start}</code></div>
       </ha-card>`;
     }
 
@@ -680,6 +705,10 @@ class TankstelleCard extends LitElement {
       }
 
       /* ---------- Responsiv (Breite der Karte) ---------- */
+      /* Handy: Zusatzinfos weglassen, damit Name und Adresse lesbar bleiben */
+      @container (max-width: 400px) {
+        .meta, .tag { display: none; }
+      }
       @container (max-width: 300px) {
         .panel { grid-template-columns: var(--cols-narrow); }
         .price { grid-column: 1 / -1; grid-row: 2; justify-self: end; min-width: 0; }
@@ -727,7 +756,7 @@ class TankstelleCard extends LitElement {
 }
 
 /* --- EDITOR (UI) --- */
-const SCHEMA = [
+const buildSchema = (L) => [
   { name: "base_entity", selector: { text: {} } },
   {
     type: "grid",
@@ -739,8 +768,8 @@ const SCHEMA = [
           select: {
             mode: "dropdown",
             options: [
-              { value: "diesel", label: "Diesel (Sensoren 1–5)" },
-              { value: "super", label: "Super (Sensoren 6–10)" },
+              { value: "diesel", label: L.opt_diesel },
+              { value: "super", label: L.opt_super },
             ],
           },
         },
@@ -759,7 +788,7 @@ const SCHEMA = [
   {
     type: "expandable",
     name: "",
-    title: "Darstellung",
+    title: L.sec_look,
     schema: [
       {
         type: "grid",
@@ -771,7 +800,7 @@ const SCHEMA = [
           { name: "logo_base", selector: { text: {} } },
           {
             name: "decimal_separator",
-            selector: { select: { mode: "dropdown", options: [{ value: ".", label: "Punkt (1.94⁹)" }, { value: ",", label: "Komma (1,94⁹)" }] } },
+            selector: { select: { mode: "dropdown", options: [{ value: ".", label: L.opt_dot }, { value: ",", label: L.opt_comma }] } },
           },
           { name: "price_box_min_width", selector: { number: { min: 60, max: 300, mode: "box", unit_of_measurement: "px" } } },
           { name: "price_font_size", selector: { number: { min: 16, max: 60, mode: "box", unit_of_measurement: "px" } } },
@@ -795,7 +824,7 @@ const SCHEMA = [
   {
     type: "expandable",
     name: "",
-    title: "Funktionen",
+    title: L.sec_features,
     schema: [
       {
         type: "grid",
@@ -818,7 +847,7 @@ const SCHEMA = [
                 mode: "dropdown",
                 options: [
                   { value: "google", label: "Google Maps" },
-                  { value: "apple", label: "Apple Karten" },
+                  { value: "apple", label: L.opt_apple },
                   { value: "waze", label: "Waze" },
                 ],
               },
@@ -832,7 +861,7 @@ const SCHEMA = [
   {
     type: "expandable",
     name: "",
-    title: "Animation",
+    title: L.sec_anim,
     schema: [
       { name: "animate_changes", selector: { boolean: {} } },
       {
@@ -850,36 +879,86 @@ const SCHEMA = [
 ];
 
 const LABELS = {
-  base_entity: "Basis-Entity (z.B. sensor.leonding)",
-  fuel_type: "Spritart",
-  count: "Anzahl Tankstellen",
-  location_name: "Ortsname (Untertitel, wird aus Adresse entfernt)",
-  title_override: "Titel (leer = Standard)",
-  card_color: "Mastfarbe (z.B. #1c1c1c)",
-  accent_color: "Akzentfarbe Krone (leer = automatisch)",
-  led_color: "LED-Farbe",
-  decimal_separator: "Dezimaltrenner",
-  price_box_min_width: "Min. Breite Preisbox",
-  price_font_size: "Schriftgröße Preis",
-  show_header: "Krone (Titel) anzeigen",
-  show_logos: "Logos anzeigen",
-  show_rank: "Platznummer anzeigen",
-  logo_base: "Logo-Pfad (leer = aus GitHub-Repo)",
-  show_base: "Standfuß anzeigen",
-  show_updated: "Aktualisierungszeit anzeigen",
-  superscript_digit: "Letzte Stelle hochgestellt",
-  ghost_digits: "LED-Hintergrundsegmente",
-  highlight_cheapest: "Bestpreis hervorheben",
-  show_diff: "Differenz zum Bestpreis (ct)",
-  show_distance: "Entfernung von Zuhause",
-  show_navigation: "Navigations-Button",
-  nav_provider: "Navigations-App",
-  trend_minutes: "Trendpfeil anzeigen für",
-  animate_changes: "Animation bei Preisänderung",
-  up_color: "Farbe: Preis steigt",
-  down_color: "Farbe: Preis fällt",
-  pulse_scale: "Puls-Stärke",
-  glow_strength: "Glow-Stärke",
+  de: {
+    base_entity: "Basis-Entity (z.B. sensor.leonding)",
+    fuel_type: "Spritart",
+    count: "Anzahl Tankstellen",
+    location_name: "Ortsname (Untertitel, wird aus Adresse entfernt)",
+    title_override: "Titel (leer = Standard)",
+    card_color: "Mastfarbe (z.B. #1c1c1c)",
+    accent_color: "Akzentfarbe Krone (leer = automatisch)",
+    led_color: "LED-Farbe",
+    logo_base: "Logo-Pfad (leer = aus GitHub-Repo)",
+    decimal_separator: "Dezimaltrenner",
+    price_box_min_width: "Min. Breite Preisbox",
+    price_font_size: "Schriftgröße Preis",
+    show_header: "Krone (Titel) anzeigen",
+    show_logos: "Logos anzeigen",
+    show_rank: "Platznummer anzeigen",
+    show_base: "Standfuß anzeigen",
+    show_updated: "Aktualisierungszeit anzeigen",
+    superscript_digit: "Letzte Stelle hochgestellt",
+    ghost_digits: "LED-Hintergrundsegmente",
+    highlight_cheapest: "Bestpreis hervorheben",
+    show_diff: "Differenz zum Bestpreis (ct)",
+    show_distance: "Entfernung von Zuhause",
+    show_navigation: "Navigations-Button",
+    nav_provider: "Navigations-App",
+    trend_minutes: "Trendpfeil anzeigen für",
+    animate_changes: "Animation bei Preisänderung",
+    up_color: "Farbe: Preis steigt",
+    down_color: "Farbe: Preis fällt",
+    pulse_scale: "Puls-Stärke",
+    glow_strength: "Glow-Stärke",
+    sec_look: "Darstellung",
+    sec_features: "Funktionen",
+    sec_anim: "Animation",
+    opt_diesel: "Diesel (Sensoren 1–5)",
+    opt_super: "Super (Sensoren 6–10)",
+    opt_dot: "Punkt (1.94⁹)",
+    opt_comma: "Komma (1,94⁹)",
+    opt_apple: "Apple Karten",
+  },
+  en: {
+    base_entity: "Base entity (e.g. sensor.leonding)",
+    fuel_type: "Fuel type",
+    count: "Number of stations",
+    location_name: "Location name (subtitle, removed from address)",
+    title_override: "Title (empty = default)",
+    card_color: "Pylon colour (e.g. #1c1c1c)",
+    accent_color: "Crown accent colour (empty = automatic)",
+    led_color: "LED colour",
+    logo_base: "Logo path (empty = from GitHub repo)",
+    decimal_separator: "Decimal separator",
+    price_box_min_width: "Min. width of price box",
+    price_font_size: "Price font size",
+    show_header: "Show crown (title)",
+    show_logos: "Show logos",
+    show_rank: "Show rank number",
+    show_base: "Show pylon base",
+    show_updated: "Show update time",
+    superscript_digit: "Last digit superscript",
+    ghost_digits: "LED background segments",
+    highlight_cheapest: "Highlight best price",
+    show_diff: "Difference to best price (ct)",
+    show_distance: "Distance from home",
+    show_navigation: "Navigation button",
+    nav_provider: "Navigation app",
+    trend_minutes: "Show trend arrow for",
+    animate_changes: "Animate price changes",
+    up_color: "Colour: price rising",
+    down_color: "Colour: price falling",
+    pulse_scale: "Pulse strength",
+    glow_strength: "Glow strength",
+    sec_look: "Appearance",
+    sec_features: "Features",
+    sec_anim: "Animation",
+    opt_diesel: "Diesel (sensors 1–5)",
+    opt_super: "Petrol / Super (sensors 6–10)",
+    opt_dot: "Dot (1.94⁹)",
+    opt_comma: "Comma (1,94⁹)",
+    opt_apple: "Apple Maps",
+  },
 };
 
 class TankstelleCardEditor extends LitElement {
@@ -904,12 +983,13 @@ class TankstelleCardEditor extends LitElement {
 
   render() {
     if (!this.hass || !this._config) return html``;
+    const L = LABELS[langOf(this.hass)];
     return html`
       <ha-form
         .hass=${this.hass}
         .data=${this._config}
-        .schema=${SCHEMA}
-        .computeLabel=${(s) => LABELS[s.name] ?? s.name}
+        .schema=${buildSchema(L)}
+        .computeLabel=${(s) => L[s.name] ?? s.name}
         @value-changed=${this._valueChanged}
       ></ha-form>
     `;
@@ -923,9 +1003,9 @@ window.customCards = window.customCards || [];
 if (!window.customCards.some((c) => c.type === "tankstelle-card")) {
   window.customCards.push({
     type: "tankstelle-card",
-    name: "Tankstellen Preismast",
+    name: "Tankstellen Preismast / Fuel Price Pylon",
     preview: true,
-    description: "Spritpreise im Look einer Tankstellen-Preissäule – responsiv, mit Bestpreis, Entfernung, Navigation & Preis-Animation.",
+    description: "Spritpreise im Look einer Preissäule / Fuel prices styled like a petrol station price pylon.",
   });
 }
 
